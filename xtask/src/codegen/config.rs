@@ -1390,7 +1390,12 @@ Handle(Geom_CylindricalSurface) cylinder = new Geom_CylindricalSurface(ax3, radi
 // A helix on a cylindrical surface is a 2D line: u = t, v = pitch/(2*pi) * t
 double slope = pitch / (2.0 * M_PI);
 double nTurns = height / pitch;
-double uMax = nTurns * 2.0 * M_PI;
+// gp_Dir2d normalizes (1, slope) to unit length, so advancing the edge
+// parameter by t moves only t / sqrt(1 + slope^2) along u (the angle). Scale
+// the parameter range by that length so the edge actually sweeps nTurns full
+// turns and the full height instead of falling short.
+double dirLen = std::sqrt(1.0 + slope * slope);
+double uMax = nTurns * 2.0 * M_PI * dirLen;
 
 Handle(Geom2d_Line) line2d = new Geom2d_Line(gp_Pnt2d(0, 0), gp_Dir2d(1, slope));
 
@@ -1699,6 +1704,7 @@ auto parseType = [](const std::string& t) -> TopAbs_ShapeEnum {
     if (t == \"face\") return TopAbs_FACE;
     if (t == \"shell\") return TopAbs_SHELL;
     if (t == \"solid\") return TopAbs_SOLID;
+    if (t == \"compsolid\") return TopAbs_COMPSOLID;
     if (t == \"compound\") return TopAbs_COMPOUND;
     throw std::runtime_error(\"Unknown shape type: \" + t);
 };
@@ -1866,6 +1872,7 @@ auto parseType = [](const std::string& t) -> TopAbs_ShapeEnum {
     if (t == \"face\") return TopAbs_FACE;
     if (t == \"shell\") return TopAbs_SHELL;
     if (t == \"solid\") return TopAbs_SOLID;
+    if (t == \"compsolid\") return TopAbs_COMPSOLID;
     if (t == \"compound\") return TopAbs_COMPOUND;
     throw std::runtime_error(\"Unknown shape type: \" + t);
 };
@@ -3622,10 +3629,12 @@ for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
 MeshData result;
 result.positionCount = totalNodes * 3;
 result.normalCount = totalNodes * 3;
+result.uvCount = totalNodes * 2;
 result.indexCount = totalTris * 3;
 
 result.positions = static_cast<float*>(std::malloc(result.positionCount * sizeof(float)));
 result.normals = static_cast<float*>(std::malloc(result.normalCount * sizeof(float)));
+result.uvs = static_cast<float*>(std::malloc(result.uvCount * sizeof(float)));
 result.indices = static_cast<uint32_t*>(std::malloc(result.indexCount * sizeof(uint32_t)));
 result.faceGroupCount = totalFaces * 3;
 result.faceGroups =
@@ -3633,6 +3642,7 @@ result.faceGroups =
 
 if ((!result.positions && result.positionCount > 0) ||
     (!result.normals && result.normalCount > 0) ||
+    (!result.uvs && result.uvCount > 0) ||
     (!result.indices && result.indexCount > 0) ||
     (!result.faceGroups && result.faceGroupCount > 0)) {
     throw std::runtime_error(\"tessellate: memory allocation failed\");
@@ -3660,6 +3670,20 @@ for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
         result.positions[base + 0] = static_cast<float>(p.X());
         result.positions[base + 1] = static_cast<float>(p.Y());
         result.positions[base + 2] = static_cast<float>(p.Z());
+    }
+
+    // UV parameters (zero-filled where the triangulation carries no UV nodes)
+    bool hasUV = tri->HasUVNodes();
+    for (int i = 1; i <= nbNodes; i++) {
+        int uvBase = (vertexOffset + i - 1) * 2;
+        if (hasUV) {
+            const gp_Pnt2d& uv = tri->UVNode(i);
+            result.uvs[uvBase + 0] = static_cast<float>(uv.X());
+            result.uvs[uvBase + 1] = static_cast<float>(uv.Y());
+        } else {
+            result.uvs[uvBase + 0] = 0.0f;
+            result.uvs[uvBase + 1] = 0.0f;
+        }
     }
 
     // Normals
@@ -3719,7 +3743,7 @@ return result;",
             "BRep_Tool.hxx", "NCollection_Vec3.hxx", "Poly_Triangulation.hxx",
             "TopAbs_Orientation.hxx", "TopExp_Explorer.hxx", "TopLoc_Location.hxx",
             "TopTools_ShapeMapHasher.hxx", "TopoDS.hxx", "TopoDS_Face.hxx",
-            "gp_Dir.hxx", "gp_Pnt.hxx",
+            "gp_Dir.hxx", "gp_Pnt.hxx", "gp_Pnt2d.hxx",
         ],
         category: "tessellate",
         return_type: ReturnType::MeshData,
