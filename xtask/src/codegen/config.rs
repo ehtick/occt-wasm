@@ -4543,6 +4543,70 @@ return tmpPath;",
         category: "xcaf",
         return_type: ReturnType::String,
     },
+    // --- Bulk array marshalling (Embind-only heap transfer) ---
+    // These let the JS wrapper move large arrays across the WASM boundary in a
+    // single HEAP copy instead of N per-element push_back() crossings, which
+    // measured as ~50% of the cost of point-array methods like interpolatePoints.
+    // Emitted to the Embind target only (filtered out of WASI/crate in run.rs):
+    // the crate marshals via wasmtime linear memory and has no use for them.
+    // These never enter OCCT, so they use CustomBodyRaw (no Standard_Failure
+    // catch — that would be dead code). allocBytes throws on malloc failure so
+    // the JS side never silently writes a typed-array view at offset 0.
+    MethodSpec {
+        name: "allocBytes",
+        kind: MethodKind::CustomBodyRaw,
+        params: &[FacadeParam::Int("byteCount")],
+        occt_class: "",
+        ctor_args: "",
+        setup_code: "void* p = std::malloc(static_cast<size_t>(byteCount));\nif (!p) {\n    throw std::runtime_error(\"allocBytes: malloc failed (out of WASM linear memory)\");\n}\nreturn static_cast<int>(reinterpret_cast<uintptr_t>(p));",
+        includes: &["cstdlib", "stdexcept"],
+        category: "marshal",
+        return_type: ReturnType::Int,
+    },
+    MethodSpec {
+        name: "freeBytes",
+        kind: MethodKind::CustomBodyRaw,
+        params: &[FacadeParam::Int("ptr")],
+        occt_class: "",
+        ctor_args: "",
+        setup_code: "std::free(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<uint32_t>(ptr))));",
+        includes: &["cstdlib"],
+        category: "marshal",
+        return_type: ReturnType::Void,
+    },
+    MethodSpec {
+        name: "vectorF64FromHeap",
+        kind: MethodKind::CustomBodyRaw,
+        params: &[FacadeParam::Int("ptr"), FacadeParam::Int("count")],
+        occt_class: "",
+        ctor_args: "",
+        setup_code: "const double* p =\n    reinterpret_cast<const double*>(static_cast<uintptr_t>(static_cast<uint32_t>(ptr)));\nreturn std::vector<double>(p, p + count);",
+        includes: &[],
+        category: "marshal",
+        return_type: ReturnType::VectorDouble,
+    },
+    MethodSpec {
+        name: "vectorU32FromHeap",
+        kind: MethodKind::CustomBodyRaw,
+        params: &[FacadeParam::Int("ptr"), FacadeParam::Int("count")],
+        occt_class: "",
+        ctor_args: "",
+        setup_code: "const uint32_t* p =\n    reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(static_cast<uint32_t>(ptr)));\nreturn std::vector<uint32_t>(p, p + count);",
+        includes: &[],
+        category: "marshal",
+        return_type: ReturnType::VectorUint32,
+    },
+    MethodSpec {
+        name: "vectorI32FromHeap",
+        kind: MethodKind::CustomBodyRaw,
+        params: &[FacadeParam::Int("ptr"), FacadeParam::Int("count")],
+        occt_class: "",
+        ctor_args: "",
+        setup_code: "const int* p =\n    reinterpret_cast<const int*>(static_cast<uintptr_t>(static_cast<uint32_t>(ptr)));\nreturn std::vector<int>(p, p + count);",
+        includes: &[],
+        category: "marshal",
+        return_type: ReturnType::VectorInt,
+    },
 ];
 
 /// Returns the complete list of facade method specifications.
@@ -4564,13 +4628,16 @@ mod tests {
             .iter()
             .filter(|m| m.kind != MethodKind::Skip)
             .count();
-        assert_eq!(count, 173, "expected 173 generable methods");
+        assert_eq!(count, 178, "expected 178 generable methods");
     }
 
     #[test]
     fn all_generable_methods_have_occt_class_or_custom_body() {
         for m in target_methods() {
-            if m.kind != MethodKind::Skip && m.kind != MethodKind::CustomBody {
+            if m.kind != MethodKind::Skip
+                && m.kind != MethodKind::CustomBody
+                && m.kind != MethodKind::CustomBodyRaw
+            {
                 assert!(
                     !m.occt_class.is_empty(),
                     "generable method '{}' is missing occt_class",
