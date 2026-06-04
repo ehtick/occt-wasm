@@ -144,6 +144,9 @@ export type ShapeOrientation = "forward" | "reversed" | "internal" | "external";
 /** BRepClass_FaceClassifier result for a UV point relative to a face boundary. */
 export type PointClassification = "in" | "on" | "out";
 
+/** Which extreme of a shape's bounding box to align to a target coordinate. */
+export type AlignAnchor = "min" | "center" | "max";
+
 /** Geom_Surface subclass identifier returned by surfaceType. */
 export type SurfaceKind = "plane" | "cylinder" | "cone" | "sphere" | "torus" | "bspline" | "bezier" | "offset" | "revolution" | "extrusion" | (string & {});
 
@@ -161,6 +164,16 @@ export enum TransitionMode {
 }
 
 /** Join type for offset/fillet operations (BRepOffsetAPI_MakeOffset). */
+/** Profile-orientation mode for {@link OcctKernel.sweepOriented}. */
+export enum SweepMode {
+    /** Minimal-torsion parallel transport — profile does not rotate (corrected Frenet). */
+    Fixed = 0,
+    /** Profile follows the spine's principal normal (Frenet trihedron). */
+    Frenet = 1,
+    /** Profile keeps a caller-supplied up/binormal direction constant. */
+    FixedUp = 2,
+}
+
 export enum JoinType {
     /** Arc interpolation at joints (default). */
     Arc = 0,
