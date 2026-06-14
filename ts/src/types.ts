@@ -407,3 +407,26 @@ function classifyError(operation: string, message: string): OcctErrorCode {
 
     return OcctErrorCode.Unknown;
 }
+
+/**
+ * Run `fn`, re-throwing any failure as an {@link OcctError} tagged with the
+ * given operation name. Shared by the kernel and the XCAF document so error
+ * classification stays in one place.
+ */
+export function wrap<T>(operation: string, fn: () => T): T {
+    try {
+        return fn();
+    } catch (e: unknown) {
+        if (e instanceof OcctError) {
+            // Already classified by an inner wrapped call. Preserve the original
+            // (most-specific) code and just retag the operation, so re-wrapping
+            // a passthrough like cacheStep/loadCached doesn't reclassify e.g.
+            // ImportExportFailed down to KernelError.
+            throw new OcctError(operation, e.message, e.code);
+        }
+        if (e instanceof Error) {
+            throw new OcctError(operation, e.message);
+        }
+        throw new OcctError(operation, String(e));
+    }
+}
